@@ -1,362 +1,1010 @@
 # Air We Go — Security Requirements
 
-Status: **provisional / bootstrap**. No implementation exists yet. This
-document translates [`REQUIREMENTS.md`](./REQUIREMENTS.md) §7 (Security
-Requirements) and §8 (Reliability and Data Quality), plus the stack decisions
-in [`ARCHITECTURE.md`](./ARCHITECTURE.md), into concrete, enforceable rules
-for Claude Code and every contributor. It is grounded in:
+- **Status:** Threat-model-derived security baseline; provisional until the
+  decision gates in ARCHITECTURE.md §9 are approved
+- **Version:** 0.2
+- **Threat-model assessment date:** 2026-07-17
+- **Approval status:** Draft baseline; no accountable owner or approver has signed off
+- **Owner / approvers:** TO BE DECIDED before implementation; approval must
+  include product, security, privacy/legal, air-quality domain, engineering,
+  mobile/client, accessibility, and operations representatives
+- **Next review:** Before architecture freeze, and on every NFR-MAINT-007 trigger
+- **v0.2 change summary:** Replaced the preliminary checklist with threat-derived, testable control and release requirements
 
-- [OWASP Top 10 Proactive Controls](https://owasp.org/www-project-proactive-controls/)
-- [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/)
-- [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
-- [OWASP REST Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)
+No implementation exists. All controls are **Required by design — Not
+Verified** until linked deployment or repeatable test evidence exists.
 
-Per `ARCHITECTURE.md`, Air We Go is a web + mobile + REST API platform (Node.js
-backend, React web client, React Native mobile client, Azure/Terraform
-deployment). This document therefore prioritizes, in order: **HTTP boundary
-security, authentication and authorization, input validation, secret
-handling, logging and error handling, deployment/CI-CD safety, and privacy
-(GDPR-aligned) compliance.** The administrative surface is the primary
-hardening target per `ARCHITECTURE.md` §"Security posture."
+This document turns REQUIREMENTS.md §7–§9 and the threat model in
+ARCHITECTURE.md §8 into enforceable rules for every contributor, service,
+client, deployment, administrator, and vendor integration. It is a security
+floor. A framework or ADR may make a rule more specific but may not weaken it
+without a risk acceptance that SEC-IR-003 actually permits; an unresolved
+Critical finding cannot be accepted for initial production.
 
-Nothing below overrides a `REQUIREMENTS.md` §7 "must." Where this document
-adds detail, it narrows implementation choices — it does not loosen the
-underlying requirement.
-
----
-
-## Required Security Inputs
-
-These are the facts a security review or Claude Code needs and where they
-currently stand. Items marked **TO BE DECIDED** are open in
-`ARCHITECTURE.md` and must be resolved before the corresponding rule below
-can move from provisional to final.
-
-| Input | Status | Source |
-|---|---|---|
-| Runtime / language | Node.js (server), React (web), React Native (mobile) | ARCHITECTURE.md |
-| API style | REST, versioned | ARCHITECTURE.md, API-004 |
-| Specific Node framework (Express / NestJS / Fastify / other) | **TO BE DECIDED** | ARCHITECTURE.md "Unknown" |
-| Auth model | Password (argon2id) + optional passkey for regular users; **mandatory** phishing-resistant passkey for admins | ARCHITECTURE.md |
-| WebAuthn/passkey library & relying-party config | **TO BE DECIDED** | ARCHITECTURE.md |
-| Authorization model | Server-enforced RBAC (ADMIN-002 roles) as the default; attribute-based rules only where a role can't express the constraint | ARCHITECTURE.md, ADMIN-002 |
-| Deployment | Microsoft Azure, provisioned via Terraform | ARCHITECTURE.md |
-| Azure compute target (containers vs. PaaS) | **TO BE DECIDED** | ARCHITECTURE.md |
-| Secret store | Azure-native secret manager assumed, product **TO BE DECIDED** | ARCHITECTURE.md |
-| CI/CD tooling | **TO BE DECIDED** (must satisfy NFR-MAINT-005) | ARCHITECTURE.md |
-| Operational / historical data-store engines | **TO BE DECIDED** | ARCHITECTURE.md |
-| Observability stack (metrics/tracing/alerting) | **TO BE DECIDED** (must satisfy OBS-\*) | ARCHITECTURE.md |
-| Air-quality / map / geocoding providers | **TO BE DECIDED** (§13 Q2, Q13) — affects the SSRF allowlist and third-party data-processing agreements | REQUIREMENTS.md §13 |
-| Privacy jurisdictions in scope | **TO BE DECIDED** (§13 Q24) — assume GDPR applies given global/EU scope until ruled out | REQUIREMENTS.md §13 |
-| Data retention periods per class | **TO BE DECIDED** (§5.4) | REQUIREMENTS.md §5.4 |
-| RPO / RTO and region topology | **TO BE DECIDED** (§13 Q25, REL-005) | REQUIREMENTS.md, ARCHITECTURE.md |
+Normative security references include the OWASP Application Security
+Verification Standard, OWASP API Security Top 10, OWASP Cheat Sheet Series,
+OWASP Mobile Application Security Verification Standard, WebAuthn/FIDO2
+specifications, current Node.js security guidance, and primary Microsoft
+Azure and HashiCorp Terraform security guidance. A project control remains
+normative even when an external reference changes. Version/pin the exact
+reference used in an ADR or test profile rather than relying on a mutable
+landing page.
 
 ---
 
-## Provisional Security Rules
+## 1. Threat-Model Posture
 
-### 1. HTTP Boundary Security
+The controlling threats are TM-01–TM-24 in ARCHITECTURE.md:
 
-- All production traffic over TLS only; no cleartext fallback (SEC-API-001).
-- CORS is an explicit allowlist of known origins — never `*` with credentials
-  (SEC-API-002).
-- Every state-changing request from a browser session requires CSRF
-  protection when cookie-based auth is used (SEC-API-003) — e.g. double-submit
-  token or `SameSite=strict` plus origin check.
-- Enforce on every endpoint: authentication where required, authorization,
-  rate limiting, request-size limits, timeouts, pagination limits, and schema
-  validation (SEC-API-004, API-005/006/007).
-- Public API vs. authenticated API vs. administrative API are physically or
-  logically isolated; the admin surface never shares a base path or trust
-  boundary with the public API (API-003).
-- Historical/query endpoints enforce maximum date ranges and result sizes to
-  prevent unbounded processing (NFR-PERF-004).
-- Outbound calls to air-quality providers, map tiles, and geocoding services
-  are restricted to a configured destination allowlist — reduces SSRF risk
-  from provider-supplied redirects or malicious feed URLs (SEC-INPUT-005).
+- provider, rule, administrative, queue, cache, and failover corruption of
+  public air-quality data;
+- administrative authentication/recovery bypass, insider misuse, SSRF to
+  Azure identity/control plane, and supply-chain takeover;
+- account and precise/saved-location disclosure through BOLA, logs, caches,
+  mobile state, notifications, exports, backups, and third parties; and
+- public-query, ingestion, retry, queue, storage, notification, dependency,
+  and regional resource exhaustion; and
+- inaccessible, low-contrast, color-only, stale, or misleading safety status
+  that causes disabled or other users to misread conditions.
 
-### 2. Authentication
+The administrative surface is not the only hardening target. Public-data
+integrity and user/location confidentiality receive equal protection.
 
-- No custom cryptography or session protocols — use established, audited
-  libraries only (SEC-AUTH-001).
-- Passwords (where used) are hashed with `argon2id`; never a fast hash
-  (SHA-256/MD5) (SEC-AUTH-002).
-- **Administrators must authenticate with a phishing-resistant passkey
-  (WebAuthn/FIDO2)** — no password-only path for admin accounts
-  (ADMIN-001, SEC-AUTH-003). See [FIDO Alliance passkeys](https://fidoalliance.org/passkeys/):
-  passkeys use per-service key pairs, no shared secret ever leaves the
-  device, and device unlock provides built-in user verification.
-- Non-admin users authenticate with password + optional passkey as an
-  additional/alternative factor. Federated identity is out of scope for v1.
-- Auth failure responses must not reveal whether an account exists beyond
-  what's operationally necessary (SEC-AUTH-004).
-- Password-reset and email-verification tokens: cryptographically random,
-  single-use, time-limited, and bound to the specific account + action
-  (SEC-AUTH-005).
-- Sessions: unpredictable IDs, `Secure`/`HttpOnly`/`SameSite` cookies, idle +
-  absolute expiration, logout invalidation, and forced revocation on
-  password or security-sensitive changes (SEC-SESS-001–003).
+### 1.1 Security invariants
 
-### 3. Authorization
+- Deny by default at public, administrative, service, data, delivery, and
+  cloud boundaries.
+- Authenticate and authorize every human and workload action; network
+  location is not identity.
+- Treat all request, provider, queue, cache, file, log, URL, deep-link,
+  notification, vendor, and build input as untrusted until validated for its
+  destination and authority.
+- Only the publication authority defined in ARCHITECTURE.md §4.5 may write
+  trusted public observation or derived historical versions.
+- Only the Identity service may write credential, authenticator, recovery,
+  and session state.
+- No public-read identity may write trusted data or read personal, secret,
+  quarantine, audit, backup, or control-plane data.
+- No high-impact privileged mutation succeeds without durable audit; no actor
+  may approve their own elevation or high-impact change.
+- No failure, retry, replay, restore, or failover bypasses authorization,
+  current validation, freshness, version, suppression, deletion, or license
+  policy.
+- Collect and disclose the minimum personal/location data for an approved
+  purpose and delete it through every derived copy and processor.
+- Build once from reviewed immutable inputs, establish provenance, and
+  promote the same verified artifact between environments.
 
-- Deny by default; every protected operation checks authorization
-  server-side — never trust hidden navigation or client-side checks
-  (SEC-AUTHZ-001/002/005).
-- Users may only read/write their own saved locations, alerts, preferences,
-  notification settings, and sessions (SEC-AUTHZ-003).
-- Administrative permissions are granular, least-privilege, and mapped to
-  the roles in ADMIN-002 (Support/Data/Security/System Administrator,
-  Read-Only Auditor) (SEC-AUTHZ-004).
-- Default authorization model is **RBAC**, enforced server-side on every
-  admin operation. Introduce attribute-based (ABAC) rules only for
-  constraints a role can't express (e.g., "only during an active incident
-  window," "only for providers this admin manages"); when you do, follow
-  deny-overrides combination, treat unverified request headers as
-  untrusted attributes, and fail closed (deny) on a missing attribute or an
-  unreachable policy engine — never fail open.
-- Every administrative action is audited: actor, action, target, timestamp,
-  outcome, before/after values, and a correlation ID; no secrets in audit
-  records (ADMIN-007/008). Audit logs are append-only / tamper-evident
-  (SEC-LOG-005).
+### 1.2 Required decision inputs
 
-### 4. Input Validation
+The following remain TO BE DECIDED and block the associated implementation:
 
-- All untrusted input — request bodies, query params, headers, path params,
-  and **provider API responses** — is validated with positive (allowlist)
-  constraints at the trust boundary; provider responses are never trusted
-  implicitly (SEC-INPUT-001, SEC-INPUT-004, ING-010).
-- Database access is exclusively parameterized queries or a safe ORM — no
-  string-built SQL (SEC-INPUT-002).
-- Output is encoded for its destination context (HTML, JSON, URL, attribute)
-  before rendering (SEC-INPUT-003).
-- Bulk/file/archive imports (e.g., provider backfills) enforce file-size
-  limits, decompression limits, content-type validation, processing
-  timeouts, and record-count caps (SEC-INPUT-006, ING-013).
-- Invalid ingestion records are quarantined, never dropped silently or
-  allowed to block a valid batch (ING-011).
+| Input | Required before |
+|---|---|
+| Canonical domains, admin origin, app IDs, trusted-link domains and WebAuthn RP IDs | Authentication or trusted links |
+| Node.js framework/version and React rendering/version | Server/web implementation |
+| Browser and mobile session/token design | Authenticated client implementation |
+| WebAuthn library, admin authenticator assurance, bootstrap, recovery and break glass | Administrative implementation |
+| Complete role/action/field/approval matrix | Administrative implementation |
+| Provider, map/geocoder, notification and other processor selections | Corresponding integration |
+| Store, queue, cache, object, audit and backup technologies | Persistence implementation |
+| Azure compute/network/identity/region/key/secret topology | Infrastructure implementation |
+| CI/CD, registry, Terraform state and signing/provenance tooling | Production-bound merge/deploy |
+| Numeric query/import/fan-out/cost/SLO/RPO/RTO/staleness limits | Performance/topology freeze |
+| Privacy jurisdiction, purpose/basis, retention, processors/transfers, minors and analytics | Personal-data collection |
 
-### 5. Secret Handling
-
-- Secrets (API keys, signing keys, DB/provider credentials) live only in an
-  approved secret-management system — never in source, mobile app packages,
-  client-side JS, logs, container images, or config files committed to the
-  repo (SEC-004, SEC-MOB-001).
-- Generate tokens/secrets with a CSPRNG (`node:crypto.randomBytes`), never
-  `Math.random()`.
-- Mobile apps store tokens only in platform-provided secure storage
-  (Keychain / Keystore via `react-native-keychain`), never in `AsyncStorage`
-  or plain files (SEC-MOB-002).
-- Dev, test, staging, and production are logically separated environments
-  with separate secrets and no shared credentials (SEC-003).
-
-### 6. Logging and Error Handling
-
-- Log authentication failures, lockouts/throttling, password resets, session
-  revocations, authorization failures, admin actions, provider-config
-  changes, data-suppression actions, and abnormal API usage (SEC-LOG-001).
-- Never log passwords, session identifiers, auth tokens, provider secrets,
-  full reset tokens, or unnecessary precise location (SEC-LOG-002,
-  SEC-MOB-005).
-- Structured logs with synchronized timestamps and correlation/request IDs
-  for cross-service tracing (SEC-LOG-003, OBS-002).
-- Error responses to clients never include stack traces, credentials,
-  tokens, internal network details, DB queries, or config — return a generic
-  message plus correlation ID; log the full error only server-side
-  (SEC-API-005).
-- Generate security alerts for material suspicious activity (SEC-LOG-004)
-  and operational alerts per OBS-004 (provider failures, stale data,
-  elevated errors, latency, queue backlog, DB failures, auth anomalies,
-  storage exhaustion, failed backups).
-
-### 7. Deployment and CI/CD Safety
-
-Azure + Terraform is the given deployment target
-([Wiz: Terraform security best practices](https://www.wiz.io/academy/application-security/terraform-security-best-practices/)):
-
-- All infrastructure changes go through Terraform, version control, and PR
-  review — no manual console changes to shared or production environments.
-- Store Terraform state remotely and encrypted, with access restricted to
-  approved CI runners; never commit state files.
-- Separate Terraform state/workspace per environment (dev/test/staging/
-  production), matching SEC-003's logical separation requirement.
-- Run policy-as-code and static analysis (e.g., `tfsec`/Checkov, or
-  OPA/Sentinel) on every PR; block merge/apply on violations.
-- Grant least-privilege managed identities per service/pipeline — no broad
-  or shared cloud credentials.
-- Enforce mandatory resource tagging (owner, environment, data
-  classification) via policy for accountability and incident response.
-- Pin module and provider versions from a reviewed internal registry; run
-  scheduled drift detection between declared and actual infrastructure.
-- CI/CD pipelines are reproducible and automated end-to-end (NFR-MAINT-005),
-  and never bypass required checks (tests, security scans) to ship faster.
-- Dependency and secret scanning, static analysis, and security testing run
-  in CI on every change, feeding a documented vulnerability-remediation
-  process (SEC-001).
-
-### 8. Privacy / GDPR-Aligned Compliance
-
-`REQUIREMENTS.md` §13 Q24 leaves privacy jurisdiction open, but the product
-is explicitly global-scale and may serve EU users, so this document adopts
-GDPR-aligned defaults as the safe baseline until legal scoping narrows it:
-
-- Collect only personal data necessary for a defined product function — no
-  speculative collection (SEC-PRIV-001, data minimization).
-- Precise device location requires explicit, revocable user permission; the
-  app must remain usable when denied (SEC-PRIV-002, MOB-003).
-- Disclose, in plain language, what location data is collected, why,
-  whether/how long it's stored, and how to revoke it (SEC-PRIV-003).
-- Support user rights to access, correct, export, and delete personal data,
-  including full account deletion, subject to legal/security retention
-  needs (SEC-PRIV-004, USER-008).
-- Minimize precise location and account identifiers in analytics/telemetry
-  (SEC-PRIV-005).
-- Treat a confirmed EU user base as triggering: a documented lawful basis
-  per processing purpose, data processing agreements with any third-party
-  provider/processor (including map, geocoding, and notification vendors),
-  a 72-hour breach-notification capability, and a record of processing
-  activities. Confirm applicability with legal before launch.
+Each decision must meet ARCHITECTURE.md §9 rather than merely name a product.
 
 ---
 
-## 9. Stack-Specific Coding Rules
+## 2. Governance and Secure Delivery
 
-### 9.1 Backend — Node.js
+### 2.1 Change control
 
-- Use `Object.create(null)` or `Map` for dictionary/key-value objects; never
-  merge untrusted JSON into a plain object (prototype pollution). Block
-  `__proto__`/`constructor`/`prototype` keys on any merge.
-- Never build a shell command from input — use `execFile`/`spawn` with an
-  argument array, never `exec()` with concatenated input.
-- Use the `node:` import prefix for built-ins; never `require(userInput)`.
-- Always `===`; never `==`.
-- All tokens/secrets via `node:crypto.randomBytes()`, never `Math.random()`.
-- Validate every trust boundary (body, query, headers, provider payloads,
-  queue messages) with Zod/Ajv, `additionalProperties: false` to block mass
-  assignment.
-- Ban `eval()`, `new Function()`, and `vm.runInNewContext()` on any value
-  that originated outside the process.
-- Path handling: `path.resolve(baseDir, userPath)` then verify the result
-  stays under `baseDir` (traversal/zip-slip); check for symlinks before
-  reading archive members.
-- `helmet()` as the first middleware; strict CSP (no `unsafe-inline`/
-  `unsafe-eval`); HSTS with `includeSubDomains` + `preload`.
-- Rate-limit with a distributed limiter (e.g. Redis-backed); cap request
-  body size; set upstream/server timeouts.
-- Structured logging (Pino/Winston) with automatic redaction of
-  `authorization`/`cookie` headers; never `console.log` in production.
-- `npm ci` with a committed lockfile; automated dependency/secret scanning
-  in CI (Snyk/Socket or equivalent); TypeScript `strict: true`, avoid `any`.
-- Specific framework hardening (Express/NestJS/Fastify/etc.) is **TO BE
-  DECIDED** pending the framework choice in `ARCHITECTURE.md` — apply the
-  framework-specific secure-developer prompt once selected.
+- REQUIREMENTS.md, ARCHITECTURE.md, SECURITY.md, DESIGN.md, authorization
+  policy, AQI/freshness/guidance rules, CI workflows, Terraform, dependency
+  policy, and production configuration require protected history and review
+  by an authorized owner.
+- Branch protection, CODEOWNERS or equivalent ownership, required reviews,
+  required CI checks, deployment approvals, emergency bypass, and rollback
+  must be defined before production-bound implementation is merged
+  (NFR-MAINT-008, TM-04, TM-16, TM-24).
+- Security-sensitive changes require an independent reviewer who did not
+  author the change. Rule/config changes with global data impact also require
+  air-quality-domain or designated data-policy approval.
+- Direct production changes are prohibited except a declared, audited,
+  time-limited break-glass action. Reconcile any emergency change back to
+  version-controlled state and review it after the incident.
 
-### 9.2 Frontend — React (Web)
+### 2.2 Threat-model lifecycle
 
-- Default to JSX interpolation (`{value}`) — it escapes automatically.
-  Never construct JSX or tag names from untrusted strings.
-- Rich/untrusted content renders via Markdown (escaped by default) or,
-  if HTML is unavoidable, DOMPurify inside one dedicated `<SafeHtml>`
-  wrapper — the only place `dangerouslySetInnerHTML` may appear anywhere in
-  the codebase.
-- Validate any externally sourced URL against an `https:`/`mailto:`/`tel:`
-  allowlist before it reaches `href`, `src`, `formAction`, or `navigate()`;
-  a Zod `.url()` check alone is insufficient (it accepts `javascript:`).
-  `target="_blank"` requires `rel="noopener noreferrer"`.
-- Validate all API responses with Zod before rendering; use an explicit
-  loading/error/ready state machine so the UI never reads fields off
-  `undefined`.
-- For `postMessage`: verify `event.origin` against an allowlist and
-  schema-validate `event.data`; never send with target origin `"*"`.
-- Never spread untrusted props onto DOM elements; use stable, non-sensitive
-  keys for list items (not raw emails/usernames, not array index for
-  reorderable lists).
-- No inline event-handler strings, `eval`, or `new Function` — the app must
-  run under a strict CSP with no `unsafe-inline`.
+- Re-run NFR-MAINT-007 before architecture freeze, production, and any new
+  trust boundary, privileged action, data class, provider/processor,
+  authentication method, region/topology, public calculation, incident, or
+  material dependency change.
+- Maintain threat ID, affected asset/flow, inherent and residual risk,
+  controls, evidence, owner, due date, status, review date, and risk
+  acceptance. Preserve cross-functional disagreements.
+- No Critical or High item is silently deferred. SEC-IR-003 requires an
+  accountable owner, independent approval, compensating controls, expiry,
+  and verification plan.
+- The current model is a single-analyst documentation baseline. Product,
+  security, privacy/legal, air-quality domain, engineering, mobile/client,
+  accessibility, and operations review are a production gate.
+- Generate and validate the NFR-MAINT-008 requirement → architecture
+  invariant/flow → security control → release-test matrix. A new normative
+  requirement, flow, threat, or control with no mapping fails documentation
+  and production-bound CI rather than relying on a manual dangling-reference
+  check alone.
 
-### 9.3 Mobile — React Native (iOS / Android)
+### 2.3 Security issue and incident readiness
 
-- Never store tokens, session data, or PII in `AsyncStorage` — it is
-  unencrypted on disk on both platforms. Use `react-native-keychain` with
-  platform-backed storage (`SECURE_HARDWARE` on Android, `THIS_DEVICE_ONLY`
-  accessibility on iOS) for anything sensitive (SEC-MOB-002).
-- Validate every native-module bridge parameter on the native side —
-  bridge serialization to JSON allows type confusion regardless of the
-  JS/TypeScript type declared on the calling side.
-- WebViews: allowlist origins, set `allowFileAccess`/
-  `allowFileAccessFromFileURLs`/`allowUniversalAccessFromFileURLs` to
-  `false`, validate every `onMessage` payload against a strict schema, and
-  never pass an auth token into a WebView.
-- Hermes bytecode is not obfuscation — it is trivially decompiled; never
-  embed API keys, signing keys, or sensitive logic in JS/TS shipped to the
-  device.
-- Deep links are attacker-controlled input from any app or browser —
-  validate scheme, host, path, and every parameter against an allowlist
-  before using them for navigation or API calls.
-- iOS: no blanket `NSAllowsArbitraryLoads`; Android:
-  `usesCleartextTraffic="false"` plus a `network_security_config.xml` — no
-  cleartext production traffic (SEC-MOB-003).
-- Minimize precise-location collection and retention; never log tokens or
-  precise location (SEC-MOB-004/005).
-- Never auto-copy sensitive values to the OS clipboard; blur/obscure
-  sensitive screens when the app enters the background (task-switcher
-  snapshot protection).
+- Maintain a monitored private channel for vulnerability reports and a
+  coordinated-disclosure process (SEC-IR-002).
+- Maintain owners and runbooks for admin takeover, provider poisoning, false
+  or stale data, personal-location disclosure, notification storms, leaked
+  credentials/signing keys, dependency/CI compromise, denial of service,
+  ransomware, and regional failure (SEC-IR-001).
+- Incident access uses ADMIN-011 break glass; evidence preservation and
+  public-data correction/withdrawal are part of containment.
 
 ---
 
-## 10. Third-Party Dependency Rules
+## 3. Security Zones, Workloads, and Data Services
 
-- Do not add a dependency when the standard library or a few lines of
-  first-party code will do.
-- Prefer zero new dependencies. If a library is required, justify it in the
-  PR description.
-- Only use libraries that are actively maintained (a commit or release
-  within the last 12 months).
-- Only use the latest stable major version — no deprecated, abandoned, or
-  pre-release packages.
-- Reject any library with a known unpatched CVE. Check before adding and on
-  every update.
-- Audit transitive dependencies, not just direct ones — a small direct
-  dependency with a large or unvetted tree is a rejection.
-- Pin exact versions with a committed lockfile. No floating ranges in
-  production.
-- Prefer libraries with narrow scope, minimal dependencies of their own,
-  and a clear security track record.
+### 3.1 Zone enforcement
+
+Implement the zones and TB-01–TB-16 in ARCHITECTURE.md:
+
+- Internet edge, administrative ingress, application, ingestion/worker,
+  private data, security/operations, delivery/cloud management, environment,
+  and region boundaries use explicit default-deny policy.
+- Databases, caches, queues, object/quarantine stores, secret/key stores,
+  audit, observability, backups, and Terraform state have no default public
+  data-plane endpoint.
+- A public/admin URL prefix is routing only. The admin client/API also uses a
+  distinct origin or independently enforced gateway, authentication audience,
+  session namespace, workload path, and operation-level authorization.
+- Production identities, secrets, state, and data are separate from
+  development/test/staging. Production personal or provider data is not
+  copied down without an approved minimized or synthetic process.
+
+### 3.2 Workload identity and east-west authorization
+
+- Each service, worker, topic producer/consumer, deployment job, backup, and
+  restore workflow uses a distinct short-lived or managed identity
+  (DATA-004, SEC-AUTHZ-007, TM-12/14/17).
+- Grant only required action/resource scope. Public API cannot write trusted
+  observations; fetch/parser workers cannot access cloud control plane or
+  unrelated secrets; ordinary runtime cannot delete backups or audit.
+- Internal non-loopback traffic carrying data or credentials uses approved
+  authenticated encryption. A service validates the intended caller,
+  audience, action, and resource even when transport or network policy also
+  authenticates the peer.
+- Authorization or identity-policy uncertainty fails closed for mutations
+  and protected reads. Availability fallbacks must not create a bypass.
+- Shared production cloud, database, queue, cache, or secret credentials are
+  prohibited.
+
+### 3.3 Queue and job security
+
+- Producers are authorized per topic/queue; consumers are authorized per
+  operation and data scope. Broker possession alone is not authority.
+- Every envelope includes schema version, message type, correlation ID,
+  idempotency key, creation and expiry times, and a bounded payload. Producer
+  identity and authorized scope come from broker-authenticated context or a
+  verified message signature; self-asserted envelope claims never confer
+  authority. Do not place credentials or unnecessary PII in messages.
+- Consumers validate envelope and payload independently, reject unknown
+  fields where security-relevant, enforce authorization, and tolerate
+  duplicate/out-of-order delivery without state regression.
+- Retry attempts, total elapsed time, queue age/depth, concurrency, fan-out
+  and payload size are bounded. Poison/expired messages go to a restricted
+  dead-letter path with redacted diagnostics and operator alerts.
+- Reprocessing repeats current validation and authorization and preserves the
+  original event/outcome. No manual replay writes directly to trusted state.
+
+### 3.4 Store, cache, backup, and key boundaries
+
+- Apply ARCHITECTURE.md §4.5 store separation even if multiple roles share an
+  engine: separate identities, schemas/namespaces, authorization, network
+  policy, keys, retention, backup, and audit.
+- Confidential/Restricted data is encrypted at rest and in backups, queues,
+  caches, object storage, logs, exports, and Terraform state. Keys are
+  environment-scoped, least-privilege, rotatable, and access-audited
+  (DATA-003).
+- Shared/public caches hold only explicitly Public, publication-eligible
+  responses. Cache keys cover every representation dimension, including
+  standard, provider/source policy, locale where meaningful, query bounds,
+  and data/rule version. Authenticated/admin/recovery/personal data is
+  private/no-store and never enters a shared cache.
+- Only trusted loaders write public cache entries. TTL never upgrades stale
+  data; correction/suppression/rule events version or invalidate every
+  affected entry. Prevent cache stampedes and cap fill work.
+- Backups use an identity and deletion authority separate from runtime,
+  encryption, version/immutability, integrity verification, retention, and
+  isolated restore. Restore tests prove that revoked credentials, deleted
+  users, old roles, suppressed data, and stale alerts are not resurrected
+  (REL-004–008, TM-20).
+
+### 3.5 Trusted time and ordering
+
+- Authentication/session expiry, WebAuthn and recovery artifacts, provider
+  freshness, message/callback replay windows, notification order, audit
+  order, retention, certificates, and key validity use approved synchronized
+  time sources under SEC-008. Duration and timeout measurement uses a
+  monotonic clock where the platform provides one.
+- Define and enforce maximum skew per workflow. Detect unsynchronized nodes,
+  backward/forward jumps, source loss, and cross-region disagreement. A
+  component must not extend validity, publish data as newer, reorder security
+  evidence, or accept a replay because its wall clock is untrusted.
+- Time-source and identity/key-plane failure modes must be capacity-bounded,
+  monitored independently, exercised in failover tests, and fail closed for
+  protected mutations while preserving safe incident access.
 
 ---
 
-## 11. Prompt Placeholders To Resolve
+## 4. Provider Ingestion and Public-Data Integrity
 
-Resolution status for each placeholder, based on the stack decisions already
-recorded in `ARCHITECTURE.md`. Unresolved sub-parts are marked
-**TO BE DECIDED** rather than guessed.
+These controls address TM-01/02/05/11/23/24 and are safety requirements, not
+optional data-quality improvements.
 
-| Placeholder | Status | Resolution |
-|---|---|---|
-| `{{CODE_QUALITY_PROMPT}}` | **Resolved** | Low cyclomatic complexity, low cognitive complexity, and separation of concerns — applied uniformly across backend, web, and mobile code. |
-| `{{API_SECURITY_PROMPT}}` | **Resolved** | REST confirmed (ARCHITECTURE.md). Apply [OWASP API Security Top 10](https://owasp.org/www-project-api-security/) and [OWASP REST Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html); compressed into §1 (HTTP Boundary Security) above. |
-| `{{BACKEND_FRAMEWORK_PROMPT}}` | **Partially resolved** | Node.js confirmed → `platform/context/prompts/code security/Backend Frameworks/NodeJS/00 Secure Node.js Developer`, compressed into §9.1. The specific framework (Express/NestJS/Fastify/other) is **TO BE DECIDED**; apply the matching framework-specific prompt in that same directory once chosen. |
-| `{{FRONTEND_FRAMEWORK_PROMPT}}` | **Resolved** | Web: React → `.../Client Side Frameworks/ReactJS/00 React19 Secure Generator (JS)`, compressed into §9.2. Mobile: React Native → `.../Mobile/02 Secure Mobile React Native Developer`, compressed into §9.3. |
-| `{{AUTH_PROMPT}}` | **Resolved** | [FIDO Alliance passkeys](https://fidoalliance.org/passkeys/) for mandatory admin authentication (§2), plus `.../Authorization/02 ABAC Architect` for authorization-policy design once RBAC alone is insufficient (§3). RBAC (ADMIN-002) remains the default authorization model for v1. |
-| `{{DEPLOYMENT_PROMPT}}` | **Resolved** | Azure + Terraform confirmed → [Wiz: Terraform security best practices](https://www.wiz.io/academy/application-security/terraform-security-best-practices/), compressed into §7. |
+### 4.1 Provider onboarding and destination control
 
-### Selected prompt imports summary
+- Approve provider ownership, license/attribution/redistribution rights,
+  endpoint ownership, current TLS behavior, authentication, schema, update
+  cadence, integrity/checksum/signature capability, rate/size limits,
+  incident contact, and compromise/revocation plan before publication.
+- Provider endpoints come only from reviewed configuration. Provider
+  payloads, request parameters, redirects, or file contents never select a
+  destination or credential.
+- Apply the complete SSRF/egress rules in §7.2 to scheduled polls, backfills,
+  preview/test retrievals, bulk files, redirects, callback verification, and
+  reprocessing.
+- Fetch identities have only the provider credentials they need and no broad
+  secret, data-store, audit, backup, or cloud-management permission.
 
-- **Architecture decision → REST, isolated admin API:** OWASP API Security
-  Top 10 + REST Security Cheat Sheet (§1, §11).
-- **Backend framework choice → Node.js (framework TBD):** Secure Node.js
-  Developer prompt (§9.1); framework-specific supplement pending.
-- **Frontend framework choice → React (web) + React Native (mobile):**
-  React 19 secure-generator prompt (§9.2) and Secure Mobile React Native
-  Developer prompt (§9.3).
-- **Auth model → password + optional passkey (users), mandatory passkey
-  (admins):** FIDO passkeys reference (§2) + ABAC Architect prompt for
-  future policy design (§3).
-- **Deployment model → Azure + Terraform:** Wiz Terraform security
-  best-practices reference (§7).
+### 4.2 Quarantine and immutable provenance
+
+- Write the exact raw response or license-permitted canonical equivalent to a
+  private non-executable origin before parsing; record provider identity,
+  destination, retrieval time, headers needed for provenance, adapter/parser
+  version, size, and cryptographic digest (ING-004).
+- Retain only allowlisted provenance headers. Never persist provider or client
+  Authorization/Cookie values, private keys, client certificates, bearer
+  tokens, or other transport credentials with a raw response.
+- Never render provider HTML, load remote provider assets, serve an uploaded
+  object inline from an application origin, or open an archive on an admin
+  workstation. Use a safe text/structured viewer and attachment/nosniff
+  responses where downloads are approved.
+- Strictly bound compressed/expanded bytes, records, nesting, filenames,
+  memory, CPU, storage, network, duration, redirects, and concurrency.
+  Reject traversal, symlink/hard-link escape, overlapping entries, external
+  entity resolution, executable serialization, and unsupported formats.
+- Invalid or ambiguous data remains quarantined. Quarantine access is
+  least-privilege and audited; reprocessing does not skip current controls.
+
+### 4.3 Publication eligibility
+
+- Validate source/authenticity evidence, strict schema, type, finite numeric
+  values, coordinates, timestamps, units, averaging period, pollutant,
+  station/provider scope, duplicates, replay/order, freshness, semantic
+  range, anomaly, conflicts, license, suppression, and provenance before
+  publication (ING-010/015–017, AQ-009).
+- Syntactic validity is not trust. Mandatory anomaly/reconciliation compares
+  provider/source history and configured scientific policy, records
+  explainable reasons, and alerts both on high-impact anomalies and unexpected
+  validator silence.
+- Preserve source values. Conversion/aggregation is deterministic and
+  references immutable inputs, adapter/rule version, authoritative source,
+  effective period, tests, reviewer, and approval. Do not combine standards,
+  units, averaging periods, locations, or timestamps without an explicit
+  reviewed rule.
+- Only the publication authority writes trusted versions. Its current-data
+  writer is exclusive; if approved, a separately authenticated aggregation
+  writer may write only derived historical/analytical versions from eligible
+  immutable inputs and cannot write current state or emit alert eligibility.
+  Failure preserves the last eligible version under its true freshness state;
+  expired data becomes unavailable.
+- Corrections/suppressions keep the original, actor, reason, evidence,
+  approval, effect, and restoration history and invalidate/version all
+  derived data, caches, API output, and pending notifications.
+
+### 4.4 Alerts
+
+- Evaluate only a committed publication-eligible observation. Include
+  observation identity/source, rule version, prior alert state, evaluation
+  time, expiry, and idempotency key.
+- Out-of-order, replayed, stale, expired, suppressed, or corrected data cannot
+  create a false threshold crossing or recovery. Recovery requires a prior
+  committed trigger for the same alert.
+- Check recipient verification, current opt-in, destination, and preference
+  at send time. Enforce per-user, destination, channel and global fan-out/
+  retry budgets and isolate a failing vendor.
+- Delivery-status and provider callbacks follow SEC-API-009: authenticate the
+  sender, bind environment/account/type, validate schema and scope, enforce a
+  trusted-time replay window plus idempotency, and never treat provider
+  acceptance as proof of device delivery.
+- Alerts are informational, may be delayed or unavailable, and are not a
+  government/emergency service. UI exposes observation/delivery time and
+  failure/delay status without making an unsafe guarantee.
 
 ---
 
-*Security v0.1 (provisional) — derived from `REQUIREMENTS.md` §7–§9,
-`DESIGN.md`, `ARCHITECTURE.md`, and the OWASP references above. Update this
-document as the open questions in `REQUIREMENTS.md` §13 and the
-**TO BE DECIDED** items in `ARCHITECTURE.md` are resolved.*
+## 5. Authentication and Session Security
+
+### 5.1 General authentication
+
+- Use maintained standards-based libraries and platform cryptography; no
+  custom authentication, session, challenge, token, signature, or random
+  generation protocol (SEC-AUTH-001, SEC-006).
+- Construct verification/reset links from an approved canonical origin, never
+  an untrusted Host/forwarded header. Tokens are CSPRNG-generated, single-use,
+  short-lived, account/action-bound, digest-only at rest, atomically consumed,
+  and invalidated when replaced.
+- Externally visible login/registration/reset/verification/recovery behavior
+  must not reveal whether an account exists beyond an approved workflow.
+- Distributed throttles and risk signals cover account, credential,
+  network/device and global patterns without permanent lockout based on a
+  spoofable signal. Monitor password spraying, credential stuffing, reset
+  floods, WebAuthn failures, token races, and unusual authenticator changes.
+
+### 5.2 Passwords
+
+- Hash passwords with an approved adaptive memory-hard algorithm using
+  security-owned, benchmarked parameters; Argon2id is the provisional default
+  pending the cryptographic/platform compatibility ADR. Store parameters with
+  the hash and allow rehash on successful authentication. A pepper, if used,
+  remains in the key/secret boundary and has a rotation plan.
+- Require at least 15 characters, accept at least 64, document/test Unicode
+  handling, support password-manager paste/autofill, and screen new/changed
+  passwords against known-compromised values. Never silently truncate.
+- Do not use security questions, arbitrary composition rules, or periodic
+  expiry without compromise evidence. Online guessing controls are separate
+  from password hashing.
+- Password change requires recent authentication, notifies the owner, rotates
+  the current session, and revokes every other session and renewable
+  credential under USER-010.
+
+### 5.3 WebAuthn/passkeys
+
+- Every consumer and administrative WebAuthn ceremony must verify challenge,
+  ceremony type, RP ID hash, exact approved origin, account/user handle,
+  credential ownership/status, signature, approved algorithm, and the policy-
+  required user-presence/verification flags on the server. Administrative
+  WebAuthn always requires user verification; a consumer policy may not skip
+  protocol checks or weaken recovery merely because passkeys are optional.
+- Challenges are unpredictable, short-lived, and transaction/account bound;
+  atomically consume a challenge after the first completed verification
+  attempt. Rate-limit issuance and failed attempts separately. Do not trust
+  client-provided credential metadata, UV flags, origin, or challenge state
+  without protocol verification.
+- Administrative identities are invite-only and separate from consumer
+  registration/recovery. Password, email link, SMS, security question, or
+  support assertion alone cannot enroll, replace, recover, or authenticate an
+  admin.
+- Before routine production access, an administrator must have the approved
+  independent authenticator/recovery coverage so loss of one device does not
+  create a weaker fallback. Exact authenticator and sync/attestation policy is
+  a §1.2 decision.
+- Adding, replacing, or removing an admin authenticator, recovery, role
+  change, or ADMIN-010 action requires a fresh WebAuthn assertion for the
+  exact admin origin, approval by a distinct authorized person, and an
+  independent security notification/audit event.
+- Admin bootstrap/recovery requires two authorized people; no requester
+  approves their own action. Break glass follows ADMIN-011 and never becomes a
+  silent normal login path.
+
+### 5.4 Browser sessions and CSRF
+
+- Use an opaque, unpredictable, server-revocable browser session. Rotate its
+  identifier after authentication, recovery, privilege or authenticator
+  change; never place it in URL, referrer, log, analytics, notification, or
+  JavaScript-accessible persistent storage.
+- Cookies use Secure, HttpOnly, no Domain, and a SameSite value justified by
+  the flow. On a dedicated origin, prefer a __Host- cookie with Path=/; if a
+  narrower Path is required, use a different reviewed naming/scope policy
+  rather than claiming __Host- semantics.
+- SameSite is defense in depth, not the sole CSRF control. State-changing
+  browser requests use a framework-supported, session-bound unpredictable
+  anti-CSRF token plus strict Origin validation and Fetch Metadata where
+  supported. Reject state changes by GET and requests with ambiguous/missing
+  origin context unless a documented non-browser protocol applies.
+- Idle/absolute lifetimes, logout, device/session listing, revocation, and
+  distributed propagation are mandatory. Admin sessions have a separate
+  audience/namespace, shorter lifetime, no “remember me” bypass, and fresh
+  WebAuthn for each high-impact approval.
+
+### 5.5 Mobile sessions
+
+- The mobile session/token protocol is an architecture decision. It must use
+  short-lived audience/issuer-bound access, rotation or reuse detection for
+  renewable credentials, server-side revocation, secure platform storage,
+  and cleanup on logout/account deletion.
+- Bearer credentials never enter general storage, logs, URL/deep link,
+  notification payload, WebView, clipboard, crash report, or device backup.
+- Users can identify and revoke a lost mobile session; recovery or a security-
+  sensitive account change invalidates affected renewable credentials.
+
+---
+
+## 6. Authorization and Privileged Operations
+
+### 6.1 User and resource authorization
+
+- Deny by default on every protected operation and field. Validate the
+  authenticated principal, action, object ownership/scope, field set, current
+  state, and any required approval server-side.
+- Owner scope covers profile/email, authenticators/recovery, sessions, saved
+  locations, preferences, alerts, notification destinations/history,
+  personal exports, and deletion requests (SEC-AUTHZ-003).
+- Use explicit input/DTO field allowlists. Never bind user input directly to
+  a persistence model or trust a client owner/role/status field.
+- Collection, bulk, nested, export, search, status, and indirect identifier
+  endpoints enforce the same object/field/function rules as single-resource
+  operations.
+- Automated negative tests enumerate every disallowed role-resource-action,
+  cross-user ID, field, nested/bulk operation, state transition, and admin
+  function (SEC-AUTHZ-006, TM-06).
+
+### 6.2 Administrative authorization
+
+- Maintain an approved operation matrix for Support, Data, Security,
+  Application System Administrator, Read-Only Auditor, SRE/incident,
+  approval, and break-glass identities. Cloud, CI, signing, backup, key, and
+  infrastructure operators use separate workforce identities. Unmapped
+  operations are denied.
+- Read-Only Auditor cannot mutate. Support sees masked minimum data. Data
+  administrators cannot grant roles or change audit policy. Application
+  System Administrators have no routine public-data editing authority and no
+  inherited cloud/CI/Terraform/signing/backup/key authority. Security
+  administrators cannot approve their own request.
+- Role grants, admin recovery/auth policy, provider destination/credential,
+  AQI/freshness/guidance/source policy, any correction/suppression meeting the
+  versioned safety-impact threshold, personal export, and security/audit-
+  control changes require fresh WebAuthn, reason, bounded preview/scope, a
+  distinct authorized approver, rollback, durable audit, and alerting
+  (ADMIN-010). Geography alone never exempts a safety-significant action.
+- SRE, cloud-management, backup/restore, signing, and break-glass privileges
+  must be time-limited/JIT. If a selected platform cannot enforce this, it
+  does not satisfy the architecture gate without an approved replacement
+  control and SEC-IR-003 acceptance. Privilege expiry, suspension, and
+  termination revoke sessions and workload/cloud grants promptly.
+- Secret values are write-only after entry. Audit queries/exports and masked-
+  field reveals are privileged, purpose-bound, and audited.
+
+---
+
+## 7. Boundary Validation, SSRF, and Content Safety
+
+### 7.1 Schema and parser safety
+
+- Validate body, query, path, header, cookie, provider response, queue
+  message, cache entry, file/archive, deep link, native bridge, webhook, and
+  API response at the first trust boundary and again before a different
+  security interpretation.
+- Positive schemas enforce type, length, finite range, count, nesting,
+  Unicode/control-character, normalization, enum, relationship, and unknown-
+  field policy. Reject prototype-pollution keys, unsafe polymorphic types,
+  external entities, executable deserialization, numeric overflow/non-finite
+  values, and algorithm/destination selectors not granted by policy.
+- Database operations use parameter binding or an ORM interface that
+  preserves parameterization. Authorization and field allowlists remain
+  explicit; an ORM is not an authorization control.
+- Untrusted data does not form a module path, class/type name, template,
+  regular expression without complexity controls, shell command, SQL/NoSQL
+  expression, filesystem path, or dynamic code.
+
+### 7.2 Outbound request and SSRF controls
+
+- Normalize and allowlist HTTPS scheme, hostname, port, and path where
+  practical. Reject userinfo, fragments when not needed, encoded/ambiguous
+  authority, mixed encodings, unsupported IP notation, and scheme/port
+  downgrade.
+- Resolve through controlled DNS and verify every resolved/connected IPv4 and
+  IPv6 address. Block loopback, private, link-local, multicast, unspecified,
+  reserved, carrier-grade NAT where policy requires, and cloud metadata/
+  control endpoints.
+- Disable redirects unless required. When required, cap them and repeat
+  scheme/host/port/DNS/IP policy on every hop; never forward Authorization,
+  cookie, provider credential, client certificate, or sensitive header to a
+  changed origin.
+- Enforce both application checks and default-deny network egress. Pin the
+  function's allowed destinations/protocols; log destination identity and
+  policy outcome without secrets.
+- Bound connect/read/total time, bytes, expanded bytes, response count,
+  concurrency, retries and DNS behavior. Rebinding or address changes must not
+  bypass connect-time enforcement.
+- Scheduled, test, preview, callback, webhook, bulk, image, map, geocoder, and
+  admin-triggered requests use the same egress path. Do not create a
+  privileged “test URL” exception.
+
+### 7.3 Output, URL, and file safety
+
+- Use context-safe APIs or maintained serializers for the final HTML,
+  attribute, URL, JSON, CSS, email, push, log, terminal, CSV/spreadsheet, and
+  native-view context. Do not manually construct JSON or assume that escaping
+  for one context is valid for another.
+- Provider/station/location names, attribution, administrative annotations,
+  health guidance, filenames, links, and notification content are untrusted.
+  Apply length/control-character policy and show external destinations
+  clearly.
+- Do not render raw HTML. If an approved feature truly needs rich content,
+  isolate one reviewed sanitizer/rendering component, disable active content
+  and raw HTML by default, validate links after rendering, and test bypasses.
+  Markdown alone is not a sanitizer.
+- Context-specific URL policy must allow only necessary schemes and approved
+  destinations. Do not generally trust external mailto or tel links; require
+  a user-initiated feature and validate their contents.
+- Safe file extraction uses an isolated newly created directory, rejects
+  absolute/traversal/link/device entries, applies no-follow primitives where
+  available, prevents overwrite/races, and never executes or serves extracted
+  content from an active application origin.
+
+---
+
+## 8. HTTP, API, and React Web Security
+
+### 8.1 HTTP/API boundary
+
+- Production and non-loopback environment traffic carrying data or
+  credentials uses approved TLS with current certificate/hostname validation;
+  no cleartext fallback.
+- Normalize and validate Host, forwarded headers, client IP and scheme only
+  from explicitly trusted proxies. Use canonical configured origins for
+  security links and CORS decisions.
+- CORS uses the minimum exact origin/method/header allowlist; never wildcard
+  with credentials and never treats CORS as authentication.
+- Accept only documented methods and media types. State changes never use
+  GET. Enforce request and response schema, body/header/URL size, timeout,
+  pagination, geographic/date/result/cost/concurrency and output limits.
+- The reviewed machine-readable API specification (OpenAPI when selected) is
+  the production route allowlist.
+  CI/runtime checks find undocumented, debug, sample, deprecated, or
+  unprotected routes and schema/auth drift (API-011, SEC-API-008).
+- Error responses are stable and generic with a correlation ID. They never
+  disclose stack trace, source path, SQL, internal host/topology, dependency
+  detail, credential, token, secret, raw provider payload, personal data, or
+  configuration.
+- Set content-type/nosniff, clickjacking/frame policy, referrer policy,
+  permissions policy, and a strict CSP appropriate to the selected rendering
+  strategy. HSTS is required after HTTPS readiness; includeSubDomains/preload
+  requires explicit ownership and rollback review for every subdomain.
+
+### 8.2 React client
+
+- Use ordinary framework text interpolation for untrusted text; do not create
+  element/tag names or spread untrusted props into DOM nodes.
+- The only approved raw/rich-content component follows §7.3 and is located by
+  an automated source check. Direct dangerous HTML sinks, dynamic code,
+  string event handlers, eval, and Function construction are prohibited.
+- Validate externally supplied href, src, form action, navigation, CSS and
+  redirect destinations with context-specific scheme/host/path rules. New
+  tabs isolate the opener.
+- Validate API responses before rendering and use explicit loading/error/
+  ready/unauthorized/stale states. Client validation never substitutes for
+  server validation.
+- postMessage verifies exact origin/source and schema; never uses wildcard
+  target origin for sensitive data.
+- Do not put email, precise/saved location, raw account ID, session, or other
+  sensitive values in DOM IDs, analytics labels, URL, referrer, source maps,
+  client logs, or reorderable list keys.
+- Service workers and browser caches follow API-012. They do not cache
+  authenticated/admin/recovery responses and purge versioned data after
+  correction, logout or account deletion as applicable.
+- Third-party runtime scripts, fonts, map SDKs and remote configuration
+  require SEC-007 and SEC-SUP-001–004 review, CSP compatibility, integrity/provenance, data-
+  flow documentation and a failure mode. Prefer pinned/self-hosted static
+  assets when it reduces tracking and supply-chain risk.
+
+---
+
+## 9. React Native and Mobile Security
+
+- Store authentication material only through approved platform-backed secure
+  storage. General async/preferences storage, files, logs, crash reports,
+  clipboard, WebViews and JS bundles are not secret storage.
+- Classify local databases/files/caches, set a bounded retention, exclude
+  Confidential/Restricted state from device/cloud backup, and purge affected
+  state on logout, account deletion, permission revocation and expiry
+  (SEC-MOB-006). If backup exclusion cannot be enforced for a storage
+  location, Restricted data must not be persisted there.
+- Recently viewed Public observations may be cached; saved labels/search
+  history or association with an account are Confidential. Do not create a
+  precise location history.
+- Request foreground location just in time for a user action. Do not request
+  background/continuous location in v1. Denial/revocation preserves manual
+  search. Reduce precision/on-device process where the feature permits it.
+- Validate deep/universal links, custom schemes, intents, push navigation,
+  share input, native-module bridge values and WebView messages on the native
+  receiving side. Allowlist scheme/host/path/action; reauthorize personal or
+  privileged destinations.
+- WebViews, if approved, use exact origin navigation, no arbitrary file/
+  universal access, no auth token injection, strict message schema, and
+  external-browser isolation for untrusted links.
+- iOS and Android production network policy rejects cleartext and arbitrary
+  transport exceptions. Any certificate pinning proposal requires an
+  availability/rotation/recovery design; TLS validation remains mandatory.
+- Protect sensitive screens from task-switcher snapshots. If a supported
+  platform cannot enforce that protection, obscure or remove Restricted data
+  before the app backgrounds. Do not automatically copy sensitive data. Treat
+  rooted/jailbroken detection only as a risk signal, never the sole security
+  boundary.
+- Mobile packages and any remote code/config update are signed and
+  provenance-verified for the intended app/environment and distributed
+  through approved channels. Protect signing keys and test compromise,
+  rotation, rollback and forced security updates.
+
+---
+
+## 10. Privacy and User-Location Protection
+
+### 10.1 Processing inventory and minimization
+
+- DATA-001 and SEC-PRIV-007 must map every personal field from collection
+  through client, API, service, queue, cache, log/trace, store, backup,
+  support/admin view, export, and processor to deletion.
+- Exact/search/saved/default locations, custom location names, alert rules,
+  notification destination/history, IP/device/push IDs, and account-location
+  linkage are personal data. Precise durable location is Restricted.
+- Collect only for an approved purpose. Do not add background location,
+  contact access, advertising identifiers, cross-service identifiers or
+  speculative analytics.
+- Nearby lookup must use the approved minimum-disclosure pattern—on-device,
+  reduced precision, or a privacy-preserving proxy—selected at the F-28 gate.
+  Never send a vendor both a stable account identifier and precise location
+  unless a separately approved purpose cannot be achieved otherwise.
+
+### 10.2 Notice, choice, and processors
+
+- Provide layered plain-language notice before collection and just-in-time
+  permission for location, notifications and any optional analytics. State
+  purpose, fields, retention, recipients, transfer, background behavior,
+  revocation and deletion.
+- Permission or notification denial cannot block manual public-data use.
+  Consent withdrawal stops future optional processing and propagates cleanup.
+- Before any map/geocoder/push/email/analytics/observability/support/cloud
+  processor receives personal data, document controller/processor role,
+  minimum fields, purpose/basis, jurisdiction/transfer, retention, onward use,
+  security, incident terms, deletion and exit plan. Execute required
+  agreements before transfer.
+- Resolve applicable privacy jurisdictions, DPIA/impact assessment, minors/
+  minimum-age policy and analytics design before collection. Global intent
+  makes deferral until a “confirmed” user base unsafe.
+
+### 10.3 Rights and deletion
+
+- Access/export/correction/deletion requires authenticated ownership and
+  recent authentication for sensitive or destructive action. Prevent CSRF,
+  BOLA, enumeration, duplicate/racing completion and export-link leakage.
+- Exports are minimal, encrypted or otherwise protected as appropriate,
+  short-lived, single-account, non-indexable, and access-audited. Do not email
+  a bulk personal-data attachment or bearer URL without approved protection.
+- Deletion propagates to active credentials/sessions, profile, saved
+  locations, alerts, notification destinations/history, caches, queues,
+  indexes, analytics, exports, local state under app control, and processors
+  within the approved deadline.
+- Audit/legal/backup exceptions are purpose-limited, access-restricted and
+  disclosed; expiry removes or irreversibly de-identifies the subject. Rights
+  evidence records outcome without copying exported/deleted content.
+
+### 10.4 Notification privacy and anti-phishing
+
+- Default lock-screen/push/email-subject content is generic and uses a
+  non-sensitive label. Never include precise coordinates, user-defined
+  labels, account ID, token, password/reset prompt, or sensitive routine.
+- Links use a canonical allowlisted HTTPS/universal/app-link origin, contain
+  no bearer credential or sensitive query data, display their destination,
+  and authenticate/authorize inside the app before personal content.
+- Users may opt into more descriptive previews only after a clear bystander/
+  lock-screen disclosure warning.
+- Email channels must use the approved sending domains and authentication
+  controls (including SPF, DKIM and DMARC policy appropriate to rollout).
+  Messages never ask users to disclose a password, passkey, code or secret.
+
+---
+
+## 11. Cryptography, Secrets, and Configuration
+
+- Use platform or maintained approved cryptographic implementations and a
+  security-owned algorithm/protocol policy. Custom crypto, disabled
+  certificate validation, weak fallback/downgrade and hard-coded keys are
+  prohibited (SEC-006).
+- Generate tokens, identifiers requiring unpredictability, keys and nonces
+  with the platform CSPRNG. Do not use a general-purpose pseudo-random
+  function for security values.
+- Prefer managed/workload identity over secrets. Remaining provider,
+  database, signing, encryption and API credentials live in the approved
+  secret/key service, referenced by identifier rather than copied into
+  configuration.
+- Define owner, purpose, consumers, creation, delivery, version, rotation,
+  revocation, expiry, access review, compromise response, recovery and
+  destruction for every secret/key. Test rotation without outage or loss.
+- Scope secrets/keys per service, environment and purpose. Log reads and
+  administrative changes, alert unusual access, and prevent secret reveal
+  after entry.
+- Source, client bundles, mobile packages, logs/traces, crash reports, images,
+  artifacts, Terraform plans/state/output, test fixtures and support exports
+  must pass secret-leak tests. Marking a Terraform value sensitive does not
+  remove it from state.
+- Security-sensitive configuration uses strict schema, safe defaults,
+  immutable/versioned release, review/approval, integrity/provenance, audit,
+  rollback and drift detection. Ordinary feature flags cannot disable
+  authentication, authorization, audit, encryption, privacy enforcement,
+  validation, or publication gates. A separately modeled emergency override
+  requires break-glass authority, expiry, alerting, rollback, and durable
+  evidence and must never bypass authorization or evidence collection.
+
+---
+
+## 12. Logging, Audit, Detection, and Error Handling
+
+### 12.1 Safe telemetry
+
+- Log security and data-integrity events in SEC-LOG-001 plus authenticator
+  lifecycle, admin recovery/break glass, role/approval, provider endpoint/
+  credential, rule/guidance, quarantine/publication/replay, export/deletion,
+  CI/deployment, key/secret and backup/restore events.
+- Use structured fields and escape untrusted values to prevent log forging.
+  Reject or neutralize control characters and bound field size/cardinality.
+- Never log passwords, passkey assertions/challenges where replay or privacy
+  risk exists, session/refresh/reset/verification tokens, cookies/
+  Authorization headers, secrets/keys, precise location, personal export,
+  raw provider payload, full request body, Terraform secret/state, or
+  unsanitized exception objects.
+- Do not “log the full error.” Build a sanitized diagnostic object with
+  allowlisted fields. Correlation may use an opaque non-secret ID; never a raw
+  session or stable unnecessary user/location identifier.
+- Apply classification, least-privilege access, retention, sampling,
+  deletion/pseudonymization, export monitoring and regional policy to logs,
+  metrics, traces, baggage and dashboards.
+
+### 12.2 Audit integrity
+
+- Administrative and other high-impact events include actor/workload,
+  authenticated session/approval context, action, target/scope, reason,
+  outcome, safe allowlisted before/after diff, trusted timestamp/order and
+  correlation ID. Never copy a secret or unnecessary PII into a diff.
+- Application writers have append-only/write-only authority. Audit read,
+  export, retention and administration use separate identities; the actor
+  performing an operation cannot alter its evidence.
+- Use immutable/WORM retention appropriate to the selected store **and**
+  cryptographic tamper evidence anchored outside the ordinary writer's
+  authority. Verify immutability, integrity, and order on an approved
+  schedule.
+- Audit every read/export and alert on gaps, failed writes, clock anomalies,
+  integrity failures, attempted alteration/deletion, disabled collection and
+  unusual bulk access.
+- A high-impact mutation fails closed if durable audit cannot be committed.
+  A reviewed emergency durable buffer may preserve availability only when it
+  maintains integrity/order and immediately alerts for reconciliation.
+
+### 12.3 Detection and response
+
+- Every TM-01–TM-24 High/Critical path maps to preventive controls and at
+  least one detection or explicit explanation of why detection is infeasible.
+- Each alert has severity, owner, response target, runbook, escalation path
+  and evidence rule. Monitor alert delivery and on-call access; silence or a
+  disabled rule emits through an independent path.
+- Health/readiness endpoints expose coarse liveness publicly at most.
+  Dependency, topology, version/build, queue, storage and diagnostic status is
+  private, authenticated and authorized.
+- Exercise detection and incident runbooks before production and
+  periodically. Record mean detection/response evidence without claiming an
+  unmeasured guarantee.
+
+---
+
+## 13. Azure, Terraform, CI/CD, and Supply Chain
+
+### 13.1 Source, dependencies, and builds
+
+- Protected source and workflow definitions require independent owner review.
+  Untrusted pull requests/forks run without production secrets, signing keys,
+  trusted cache poisoning ability or deployment identity.
+- Allowlist and authenticate package/container registries and other artifact
+  sources. Pin third-party build actions, packages where the ecosystem permits
+  immutable resolution, images, Terraform providers/modules, and toolchains
+  to reviewed immutable versions/digests. A source that cannot provide
+  immutable, integrity-verifiable resolution requires an explicit replacement
+  control or must not enter the production build. Detect dependency confusion,
+  typosquatting, lockfile tampering, and unexpected lifecycle scripts.
+- Build in isolated ephemeral jobs from a locked dependency graph. Produce an
+  SBOM, security/license scan evidence, signed provenance/attestation and
+  integrity-verifiable artifact. Protect build cache and registry write
+  permissions.
+- Promote the same verified artifact between environments. Production
+  approval binds exact source, artifact digest, Terraform plan and target
+  environment; do not rebuild after approval.
+- Use short-lived federated/workload deployment identity, not long-lived
+  general cloud credentials. Separate build, plan, apply, signing, promotion,
+  runtime, backup and break-glass authority.
+
+### 13.2 Terraform and Azure controls
+
+- Terraform state, plans, outputs and variable files are potentially
+  Restricted. Encrypt, version, lock, access-log, back up and isolate them by
+  environment; do not expose them to untrusted CI or ordinary runtime.
+- A production apply requires policy/security checks, reviewed immutable plan,
+  protected environment approval, scoped identity and target validation.
+  Detect drift and reconcile approved emergency changes.
+- Default-deny public data-plane access and use private paths for data,
+  queue/cache, object, audit, backup and secret/key services unless a specific
+  approved threat model proves a public path necessary.
+- Enforce ingress and egress policy, managed identity protection, Azure
+  metadata-path defense, least-privilege roles, separate environments/
+  subscriptions or equivalent boundaries, resource locks where appropriate,
+  encryption, patching, diagnostics, cost quotas and required ownership/
+  classification tags.
+- Backups, keys/secrets, audit and security telemetry use authority separate
+  from the workload and from a single general cloud administrator.
+- Before any destructive infrastructure or data change, preview exact scope,
+  require approval proportional to impact, preserve recovery, and audit.
+
+### 13.3 Vulnerability and exception policy
+
+- Choose dependencies by supported lifecycle, publisher/provenance,
+  maintenance/security process, license, dependency graph, platform fit,
+  exploitability/reachability and tested known-good version—not arbitrary
+  “latest major,” release-age or dependency-count rules.
+- Prefer mature security libraries for authentication, cryptography, parsing,
+  sanitization and protocol handling over ad hoc first-party code.
+  Dependency minimization must not encourage custom security mechanisms.
+- Define release-blocking severity/exploitability policy and remediation
+  deadlines. Scan direct/transitive dependencies, runtime/container/mobile
+  packages, IaC, source, secrets and artifacts continuously and on release.
+- An exception identifies the finding, affected path/data, exploitability,
+  controls, owner, expiry and independent approver. Re-evaluate on dependency
+  or threat change.
+- Unsupported runtimes/frameworks/dependencies and known malicious packages
+  are prohibited.
+
+---
+
+## 14. Availability, Abuse, and Recovery
+
+- Classify endpoints/jobs by authentication, data sensitivity, computational/
+  vendor cost and safety criticality. Enforce request, result, range,
+  geographic area/resolution, page, filter/sort, concurrency, memory, CPU,
+  queue, storage, retry, fan-out and global cost budgets at the earliest
+  practical boundary.
+- Combine account/token, abuse-resistant network/device and global controls.
+  A spoofable IP or username alone must not permanently lock out a victim.
+- Bound provider retry attempts and elapsed time, use jitter/circuit breakers,
+  isolate providers/workloads, and reserve capacity for current trusted data,
+  authentication, administration, audit and security response.
+- Limit backfill scope/concurrency, provide cancellation, enforce provider
+  rates and idempotency, and prevent starvation of interactive/current paths.
+- Protect cache fills from stampede, queue/storage/logs from exhaustion,
+  notifications from fan-out/retry storms, and auto-scaling from unbounded
+  cost. Alert before capacity and spend limits.
+- Degraded operation exposes true freshness/delivery status. It never labels
+  stale data current, issues alerts from expired data, silently disables
+  authorization/audit, or exposes a more privileged fallback.
+- Approve numeric SLO, RPO, RTO, maximum public-data age and alert delay before
+  topology selection. Exercise provider failure, dependency latency, DDoS/
+  cost abuse, retry storms, regional loss, ransomware, restore, and false-data
+  withdrawal (NFR-AVAIL-001–005, REL-004–008).
+
+---
+
+## 15. Stack-Specific Coding Baseline
+
+These are capability rules. Framework/library-specific profiles are selected
+only after the corresponding ADR and must not weaken them.
+
+### 15.1 Node.js / TypeScript (conditional)
+
+- These rules apply only if the Node.js/TypeScript ADR in ARCHITECTURE.md §9
+  is approved. Use a supported Node.js release and strict TypeScript
+  configuration. Avoid unsafe any or unchecked type assertions at boundaries;
+  runtime schema validation remains mandatory.
+- Do not merge untrusted keys into ordinary object prototypes. Reject
+  __proto__, prototype and constructor manipulation; use Map or null-
+  prototype dictionaries when accepting dynamic keys.
+- Do not evaluate untrusted code or dynamic modules. eval, Function,
+  dangerous VM execution, string-built shell commands and require/import from
+  input are prohibited.
+- When an OS process is unavoidable, invoke a fixed executable with an
+  argument array, minimal environment/working directory, no shell, resource
+  limits and least-privilege identity.
+- Configure server proxy/Host behavior, body/header/URL limits, parsing,
+  request/response timeouts, cancellation, error mapping, security headers,
+  CORS, CSRF, rate/cost limits and graceful shutdown centrally and test that
+  routes cannot bypass them.
+- Use structured logging with recursive field/header/body redaction and test
+  error paths. Production console output is not an unreviewed bypass.
+- Files/archive handling follows §7.3; a path.resolve prefix check alone is
+  not sufficient against symlink/race attacks.
+- Use current platform CSPRNG and constant-time comparison where secret-value
+  comparison is required by a reviewed protocol.
+
+### 15.2 React web
+
+- Follow §8.2. Add automated rules for dangerous HTML/dynamic code, untrusted
+  navigation/props, browser storage of auth material, wildcard postMessage,
+  missing opener isolation and accidental sensitive logging/analytics.
+- A sanitizer, Markdown engine, map SDK, chart renderer, service worker or
+  remote font/script is a security dependency and requires explicit
+  configuration and bypass tests.
+- Source maps and debug bundles are not publicly deployed unless a reviewed
+  access/use case exists and no secret/internal source metadata is exposed.
+
+### 15.3 React Native
+
+- Follow §9. Native code and bridge receivers validate independently of
+  TypeScript types. Hermes/minification/obfuscation does not protect secrets.
+- Do not hard-code privileged backend/provider credentials or security-
+  critical authorization logic in the shipped client.
+- Test iOS and Android separately for secure storage, backup, screenshot/
+  task-switcher, network policy, universal/app links, WebView, push, logout,
+  deletion, permission revocation and signed update behavior.
+
+### 15.4 Static assets
+
+- Treat every shipped SVG, font, image, and generated design artifact as a
+  supply-chain input, including assets already present when the pipeline is
+  introduced. SVG must be sanitized to prohibit script, event handlers,
+  foreign active content, external fetches and unsafe links before serving.
+- Serve exact safe MIME types with nosniff and a CSP that does not make SVG or
+  uploaded content executable in an application origin.
+- Record source/license/provenance and deterministic generation settings;
+  strip unnecessary metadata, optimize/crop raster variants, and verify
+  expected hashes in the asset pipeline.
+- Fonts are pinned/licensed and preferably self-hosted when that avoids
+  tracking or runtime dependency; downloaded font data is not trusted code.
+
+---
+
+## 16. Verification and Release Gates
+
+The initial release must produce repeatable evidence for REQUIREMENTS.md §12.
+At minimum:
+
+| Gate | Required evidence |
+|---|---|
+| Architecture/threat | Approved F-01–F-31 flows and TB-01–TB-16 boundaries, DATA-001 inventory, TM-01–24 owners/controls/residual risks, cross-functional validation |
+| Provider/data integrity | Forged/malformed/oversized/archive/replay/order/anomaly/stale/conflict/license/correction tests; immutable provenance and golden AQI/rule vectors |
+| SSRF/egress | IPv4/IPv6 private/link-local/loopback/reserved/metadata, DNS change/rebinding, redirects, ambiguous URLs, ports/schemes, credential forwarding, slow/large responses |
+| Authentication | Enumeration, credential stuffing/spraying, breached password, reset races/replay, WebAuthn challenge/RP/origin/UV, admin bootstrap/recovery/break glass, session fixation/rotation/revocation |
+| Authorization | Complete positive and negative object/field/function/workload/admin matrix, cross-user/bulk/nested/self-elevation/approval tests |
+| Web/API | Machine-readable API-specification drift, methods/media/schema, webhook/callback authentication, environment binding, timestamp/expiry/replay/idempotency, CSRF/CORS/CSP/security headers, cache isolation/poisoning/invalidation, error/redaction, DAST/fuzz/abuse/load |
+| Mobile | Secure storage, session replay/revocation, cache/backup/screenshot cleanup, permission denial/revoke, deep links/WebViews/native bridge, TLS/cleartext, signed package/update |
+| Privacy | Notice/choice, processor/transfer approval, exact retention, data export/delete identity and downstream completion, analytics/minors gate, notification preview/link privacy |
+| Service/data | Distinct workload identities, least privilege, internal encryption, queue schema/replay/DLQ, private stores, encryption/keys, secret rotation, cache public-only |
+| Audit/detection/IR | Tamper/immutability/integrity/gap/read-export tests, trusted-time skew/jump/unsynchronized-node behavior, log/error/trace redaction and injection tests, alert delivery/silence, runbook/tabletop evidence |
+| Supply chain/cloud | Protected source/workflows, untrusted PR isolation, locked graph, SBOM/scans, signed provenance/artifacts, static-asset source/license/hash/sanitization evidence, plan/apply binding, state controls, policy/drift, rollback |
+| Resilience | Numeric SLO/RPO/RTO/staleness/cost approval; retry/fan-out/storage exhaustion, provider/vendor/region failure, ransomware, isolated restore/failover and state-resurrection tests |
+| Accessibility/safe design | Automated token/component contrast plus manual web/mobile keyboard, reader, zoom/text scaling, motion and non-color tests; known failing DESIGN.md tokens blocked |
+
+Independent penetration testing is required before initial production and
+after material authentication, authorization, admin, or trust-boundary
+changes. An unresolved Critical finding blocks initial production and cannot
+be risk accepted. An unresolved High finding blocks release unless the
+time-limited SEC-IR-003 evidence is current and the release authority
+explicitly accepts it.
+
+---
+
+## 17. Threat-to-Control Summary
+
+| Threats | Primary control families |
+|---|---|
+| TM-01/02/24 public-data corruption, ordering, or inaccessible/misleading presentation | §4 ingestion/publication, SEC-008, AQ-008–010, REL-001–003, NFR-A11Y-001–005, redundant non-color status, contrast/accessibility evidence, rule release provenance |
+| TM-03/04 admin takeover/abuse | §5.3–5.4, §6.2, ADMIN-001/009–012, audit separation |
+| TM-05 SSRF/cloud pivot | §3.2, §4.1, §7.2, SEC-SVC-003, narrow fetch identity |
+| TM-06/08 account/BOLA | §5, §6.1, API contract/cache, negative authorization testing |
+| TM-07/18/19/21 privacy/mobile/notification/callback | §8–10, SEC-API-009, DATA-001/005, authenticated callback and privacy release evidence |
+| TM-09 content/injection | §4.2, §7, §8.2, §9, static/raw safe viewers |
+| TM-10/11 availability/cost | §3.3, §4.4, §14, API-013, NFR-AVAIL-004/005 |
+| TM-12/13 internal/cache trust | §3.2–3.4, queue envelope, workload IAM, cache policy |
+| TM-14/17 stores/secrets | §3.4, §11, §13.2, DATA-003/004, private services |
+| TM-15/22 audit/detection/response | §2.3, §12, SEC-LOG-001–007, SEC-IR-001–003 |
+| TM-16 supply chain | §2.1, §13, NFR-MAINT-006/008, release provenance |
+| TM-20 recovery state resurrection | §3.4, §6.2, §14, REL-004–008 |
+| TM-23 licensing | §4.1/4.3, provider governance, publication and API tiers |
+
+---
+
+*Security baseline v0.2. Update it with each NFR-MAINT-007 trigger and attach
+verified evidence before changing a control from Not Verified.*
