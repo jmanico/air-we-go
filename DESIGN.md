@@ -54,6 +54,7 @@ truth; PNGs are convenience rasters.
 |------|-----|
 | `air-we-go-logo.svg` | **Primary** lockup: mark + wordmark + tagline. Marketing, README, splash. |
 | `air-we-go-horizontal.svg` | Mark + inline wordmark, no tagline. App headers, nav bars, email. |
+| `air-we-go-horizontal-dark.svg` | Dark-background horizontal lockup with the required white knockout wordmark. |
 | `air-we-go-mark.svg` | Mark only. Avatars, watermarks, tight spaces where the wordmark won't fit. |
 | `air-we-go-icon.svg` | Mark on a rounded tile. App icon, favicon, PWA install. |
 
