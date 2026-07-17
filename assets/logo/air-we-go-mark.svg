@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Air We Go mark: a globe with a leaf location pin and flowing air currents">
+  <title>Air We Go — Mark</title>
+  <defs>
+    <!-- Globe: green land fading into deep-blue ocean -->
+    <linearGradient id="awg-globe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7BC143"/>
+      <stop offset="0.42" stop-color="#3E9E4F"/>
+      <stop offset="0.62" stop-color="#1C7FB8"/>
+      <stop offset="1" stop-color="#0B4DA2"/>
+    </linearGradient>
+    <linearGradient id="awg-wave" x1="0" y1="0" x2="1" y2="0.2">
+      <stop offset="0" stop-color="#1C7FB8"/>
+      <stop offset="1" stop-color="#0B4DA2"/>
+    </linearGradient>
+    <linearGradient id="awg-pin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1C7FB8"/>
+      <stop offset="1" stop-color="#0B4DA2"/>
+    </linearGradient>
+    <linearGradient id="awg-leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8BD24A"/>
+      <stop offset="1" stop-color="#3E9E4F"/>
+    </linearGradient>
+    <clipPath id="awg-globe-clip"><circle cx="248" cy="256" r="150"/></clipPath>
+  </defs>
+
+  <!-- GLOBE -->
+  <g>
+    <circle cx="248" cy="256" r="150" fill="url(#awg-globe)"/>
+    <g clip-path="url(#awg-globe-clip)" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="2">
+      <!-- latitude -->
+      <line x1="98" y1="256" x2="398" y2="256"/>
+      <path d="M98 206 Q248 186 398 206"/>
+      <path d="M98 306 Q248 326 398 306"/>
+      <path d="M110 166 Q248 150 386 166"/>
+      <path d="M110 346 Q248 362 386 346"/>
+      <!-- longitude -->
+      <ellipse cx="248" cy="256" rx="50" ry="150"/>
+      <ellipse cx="248" cy="256" rx="100" ry="150"/>
+    </g>
+    <!-- abstract continents -->
+    <g clip-path="url(#awg-globe-clip)" fill="#4FB151" fill-opacity="0.92">
+      <path d="M150 150 q40 6 52 34 q10 24 -8 42 q-22 20 -50 10 q-26 -10 -30 -40 q-4 -34 36 -46 z"/>
+      <path d="M300 168 q34 -6 52 18 q14 20 -2 40 q-20 22 -46 12 q-22 -10 -22 -36 q0 -26 18 -34 z"/>
+    </g>
+    <g clip-path="url(#awg-globe-clip)" fill="#1FA7C4" fill-opacity="0.9">
+      <path d="M232 300 q26 -4 34 20 q10 30 -6 58 q-16 26 -34 14 q-14 -12 -12 -46 q2 -36 18 -46 z"/>
+    </g>
+    <circle cx="248" cy="256" r="150" fill="none" stroke="#0B4DA2" stroke-opacity="0.35" stroke-width="3"/>
+  </g>
+
+  <!-- AIR CURRENTS -->
+  <g fill="none" stroke="url(#awg-wave)" stroke-linecap="round">
+    <path d="M150 214 Q300 176 452 208" stroke-width="18"/>
+    <path d="M150 252 Q310 214 470 250" stroke-width="18"/>
+    <path d="M170 292 Q320 258 452 296" stroke-width="18"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-opacity="0.9">
+    <path d="M150 214 Q300 176 452 208" stroke-width="3"/>
+    <path d="M150 252 Q310 214 470 250" stroke-width="3"/>
+    <path d="M170 292 Q320 258 452 296" stroke-width="3"/>
+  </g>
+
+  <!-- LOCATION PIN + LEAF -->
+  <g>
+    <path d="M150 96 a52 52 0 0 1 52 52 c0 40 -52 92 -52 92 c0 0 -52 -52 -52 -92 a52 52 0 0 1 52 -52 z" fill="url(#awg-pin)"/>
+    <path d="M150 108 a40 40 0 0 1 40 40 c0 30 -40 72 -40 72 c0 0 -40 -42 -40 -72 a40 40 0 0 1 40 -40 z" fill="#ffffff"/>
+    <path d="M136 150 q28 -30 44 -14 q4 22 -14 34 q-20 12 -34 -2 q1 -10 4 -18 z" fill="url(#awg-leaf)"/>
+    <path d="M141 168 q14 -18 34 -22" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-opacity="0.85"/>
+  </g>
+</svg>
