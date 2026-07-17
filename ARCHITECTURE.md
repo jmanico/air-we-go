@@ -402,21 +402,23 @@ numeric profile must exist before implementation.
   device/network restrictions as defense in depth. It never substitutes for
   server-side operation authorization.
 
-Server-side rendering, CDN behavior, browser session transport, map/geocoder
-direct-versus-proxied flows, and third-party script use are unresolved. No
-design may send precise/saved location or a stable account identifier to a
-vendor without SEC-PRIV-007 review.
+Server-side rendering, CDN behavior, the exact server-managed browser cookie
+session profile, map/geocoder direct-versus-proxied flows, and third-party
+script use are unresolved. Browser bearer-token storage is not an alternative
+under consideration. No design may send precise/saved location or a stable
+account identifier to a vendor without SEC-PRIV-007 review.
 
 ### 4.3 Backend logical components
 
 1. **Public API** — current and historical observations, geographic search,
-   trends, public metadata, and personalized-resource routing. Public reads
-   cannot write trusted observations. Expensive operations enforce API-013
-   budgets before database work.
+   trends, and public metadata. It has no personalized-resource or trusted-
+   observation write authority. Expensive operations enforce API-013 budgets
+   before database work.
 2. **Identity and User** — registration, email verification, password and
    optional consumer passkeys, admin WebAuthn ceremonies, session/revocation,
-   preferences, saved locations, alerts, privacy-rights workflows, and
-   security notifications. Admin and consumer audiences remain separate.
+   owner-scoped personalized REST operations, preferences, saved locations,
+   alerts, privacy-rights workflows, and security notifications. Admin and
+   consumer audiences remain separate.
 3. **Provider Fetch / Bulk Intake** — uses approved static provider
    destinations and narrow egress; has no public-data write, broad cloud, or
    unrelated secret permission.
@@ -787,13 +789,13 @@ evidence and approval; a Critical finding still blocks initial production.
 
 | Surface | Spoofing | Tampering | Repudiation | Information disclosure | Denial of service | Elevation of privilege |
 |---|---|---|---|---|---|---|
-| Public/authenticated API and status UI | TM-08 | TM-06/09/13/24 | TM-08/24 | TM-06/09/13 | TM-10/13/24 | TM-06/08/09 |
-| Administrative control plane | TM-03 | TM-04/09/15 | TM-03/04/15 | TM-05/09/15 | TM-15/22 | TM-03–05/09 |
-| Provider ingestion/publication | TM-01 | TM-01/02/11/24 | TM-01 | TM-05 | TM-02/11/24 | TM-05 |
-| Services/queues/caches | TM-12 | TM-11–13 | TM-12/15 | TM-12/13/17 | TM-11/13/15/17 | TM-12/17 |
-| Stores/backups/regions | TM-21 | TM-14/15/20 | TM-15 | TM-14/15/20/21 | TM-14/15/20 | TM-14/21 |
-| Mobile/notifications/vendors | TM-08/18/19 | TM-18/19 | TM-19 | TM-07/18/19 | TM-11/18/19 | TM-18/19 |
-| CI/Terraform/cloud control | TM-16 | TM-14/16 | TM-15/16 | TM-14/16/17 | TM-14/16/17 | TM-05/14/16/17 |
+| Public/authenticated API and status UI | TM-08 | TM-06/08/09/13/24 | TM-24 | TM-06/09/13 | TM-10/13/24 | TM-06/08/09 |
+| Administrative control plane | TM-03 | TM-04/05/09/15 | TM-03/04/15 | TM-05/09/15 | TM-15/22 | TM-03–05/09 |
+| Provider ingestion/publication | TM-01 | TM-01/02/05/11/24 | TM-01/24 | TM-05 | TM-02/11/24 | TM-05/09 |
+| Services/queues/caches | TM-12 | TM-11–13 | TM-12/15 | TM-13/17 | TM-11/13/15/17 | TM-12/17 |
+| Stores/backups/regions | TM-21 | TM-14/15/20/21 | TM-15/22 | TM-14/15/17/21 | TM-14/15/17/20/22 | TM-14/17 |
+| Mobile/notifications/vendors | TM-08/18/19/21 | TM-08/18/19/21 | TM-22 | TM-18/19/21 | TM-11/22 | TM-08/18/19 |
+| CI/Terraform/cloud control | TM-12 | TM-14/16 | TM-15/22 | TM-14/16/17 | TM-14/17/22 | TM-05/14/16/17 |
 
 Coverage means analyzed, not controlled or verified.
 
@@ -975,7 +977,7 @@ approval. “Architecture freeze” means before code depends on the choice;
 |---|---|---|
 | Canonical product domains, admin origin, email/link domains, app IDs and WebAuthn RP IDs | Before auth implementation | Ownership/certificate plan, origin/RP binding, trusted links, no open redirect, domain-compromise response |
 | Node.js framework/version | Architecture freeze | Supported lifecycle; centralized schema/auth/error/security headers; safe proxy/Host/body/time defaults; update record |
-| Web rendering and browser session | Architecture freeze | Cookie/token decision, robust CSRF, CSP nonce/hash support, SSR/CDN private-cache isolation, no persistent browser bearer token |
+| Web rendering and browser cookie-session profile | Architecture freeze | Server-managed opaque cookie session is selected; decide origin/name/Path/SameSite, idle/absolute lifetime, distributed storage/revocation, robust CSRF, CSP nonce/hash support and SSR/CDN private-cache isolation; no browser bearer-token alternative |
 | Mobile session and secure storage | Architecture freeze | Short access lifetime, renewal rotation/replay detection, revocation, device/logout cleanup, deep links, backup/screenshot policy |
 | WebAuthn library/admin authenticator policy | Before admin implementation | Standards conformance, UV enforcement, challenge/RP/origin checks, bootstrap, multiple authenticators, replacement/recovery, break glass |
 | Admin permission/approval/JIT model | Before admin implementation | Complete operation matrix, SoD, no self-elevation/approval, support masking, reauth, dual control, termination and audit |

@@ -893,12 +893,13 @@ optional data-quality improvements.
 These are capability rules. Framework/library-specific profiles are selected
 only after the corresponding ADR and must not weaken them.
 
-### 15.1 Node.js / TypeScript (conditional)
+### 15.1 Node.js
 
-- These rules apply only if the Node.js/TypeScript ADR in ARCHITECTURE.md §9
-  is approved. Use a supported Node.js release and strict TypeScript
-  configuration. Avoid unsafe any or unchecked type assertions at boundaries;
-  runtime schema validation remains mandatory.
+- Because Node.js is a selected architecture input, the Node-specific rules
+  in this section are unconditional. Use a supported Node.js release. If a
+  later language ADR selects TypeScript, require strict configuration and
+  avoid unsafe `any` or unchecked boundary assertions. Runtime schema
+  validation remains mandatory in either JavaScript or TypeScript.
 - Do not merge untrusted keys into ordinary object prototypes. Reject
   __proto__, prototype and constructor manipulation; use Map or null-
   prototype dictionaries when accepting dynamic keys.
